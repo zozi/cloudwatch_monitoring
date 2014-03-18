@@ -15,3 +15,4 @@ default[:cw_mon][:options] = %w{--disk-space-util  --disk-path=/ --disk-space-us
                                 --disk-space-avail --swap-util --swap-used
                                 --mem-util --mem-used --mem-avail}
 
+default[:cw_mon][:cron_minutes] = 5
