@@ -21,36 +21,13 @@
 # limitations under the License.
 #
 
-include_recipe 'cron'
+install_path = "#{node[:cw_mon][:home_dir]}/aws-scripts-mon-#{node[:cw_mon][:version]}"
+zip_filepath = "#{node[:cw_mon][:home_dir]}/CloudWatchMonitoringScripts-#{node[:cw_mon][:version]}.zip"
 
-install_path="#{node[:cw_mon][:home_dir]}/aws-scripts-mon-v#{node[:cw_mon][:version]}"
-zip_filepath="#{node[:cw_mon][:home_dir]}/CloudWatchMonitoringScripts-v#{node[:cw_mon][:version]}.zip"
-
-case node[:platform_family]
-  when 'rhel'
-    %w{unzip perl-CPAN}.each do |p|
-      package p
-    end
-
-    %w{Test::More Bundle::LWP5_837 Bundle::LWP}.each do |m|
-      execute "install Perl module #{m}" do
-        command "perl -MCPAN -e 'install #{m}' < /dev/null"
-        not_if { ::File.directory?(install_path) }
-      end
-    end
-
-  when 'debian'
-
-    %w{unzip libwww-perl libcrypt-ssleay-perl}.each do |p|
-      package p do
-        action :install
-      end
-    end
-
-  else
-    log "#{node[:platform_family]} is not supported" do
-      level :warn
-    end
+%w(unzip libwww-perl libdatetime-perl).each do |p|
+  package p do
+    action :install
+  end
 end
 
 group node[:cw_mon][:group] do
@@ -58,16 +35,11 @@ group node[:cw_mon][:group] do
 end
 
 user node[:cw_mon][:user] do
-  home node[:cw_mon][:home_dir]
   group node[:cw_mon][:group]
+  home node[:cw_mon][:home_dir]
+  supports manage_home: true
   action :create
 end
-
-directory node[:cw_mon][:home_dir] do
-  group node[:cw_mon][:group]
-  owner node[:cw_mon][:user]
-end
-
 
 remote_file zip_filepath do
   source node[:cw_mon][:release_url]
@@ -76,7 +48,6 @@ remote_file zip_filepath do
   mode 0755
   not_if { File.directory? install_path }
 end
-
 
 bash 'extract_aws-scripts-mon' do
   user node[:cw_mon][:user]
@@ -88,45 +59,32 @@ bash 'extract_aws-scripts-mon' do
     unzip #{zip_filepath}
     mv -v ./aws-scripts-mon #{install_path}
     chown -R #{node[:cw_mon][:user]}:#{node[:cw_mon][:group]} #{install_path}
+    rm #{zip_filepath}
   EOH
   not_if { File.directory? install_path }
 end
 
-
-file zip_filepath do
-  action :delete
-end
-
-options = ['--from-cron'] + node[:cw_mon][:options]
+options = %w(--from-cron) + node[:cw_mon][:options]
 
 if iam_role = IAM::role
   log "IAM role available: #{iam_role}"
 else
-  log "no IAM role available. CloudWatch Monitoring scripts will use IAM user #{node[:cw_mon][:user]}" do
+  log "No IAM role available for CloudWatch Monitoring" do
     level :warn
-  end
-  vars = {}
-  begin
-    user_creds = Chef::EncryptedDataBagItem.load(node[:cw_mon][:aws_users_databag], node[:cw_mon][:user])
-    vars[:access_key_id] = user_creds['access_key_id']
-    vars[:secret_access_key] = user_creds['secret_access_key']
-    log "AWS key for user #{ node[:cw_mon][:user]} found in databag #{node[:cw_mon][:aws_users_databag]}"
-  rescue
-    vars =node[:cw_mon]
   end
 
   template "#{install_path}/awscreds.conf" do
     owner node[:cw_mon][:user]
     group node[:cw_mon][:group]
-    mode 0644
+    mode 0600
     source 'awscreds.conf.erb'
-    variables :cw_mon => vars
+    variables cw_mon: node[:cw_mon]
   end
 
   options << "--aws-credential-file #{install_path}/awscreds.conf"
 end
 
-cron_d 'cloudwatch_monitoring' do
+cron 'cloudwatch_monitoring' do
   minute "*/#{node[:cw_mon][:cron_minutes]}"
   user node[:cw_mon][:user]
   command %Q{#{install_path}/mon-put-instance-data.pl #{(options).join(' ')} || logger -t aws-scripts-mon "status=failed exit_code=$?"}

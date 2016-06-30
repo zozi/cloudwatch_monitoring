@@ -6,10 +6,5 @@ description      'cloudwatch_monitoring installs the Amazon CloudWatch Monitorin
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
 version "1.2.0"
 
-%w{ ubuntu debian redhat centos}.each do |os|
-  supports os
-end
-
-%w{cron}.each do |cookbook|
-  depends cookbook
-end
+supports 'ubuntu'
+supports 'debian'
